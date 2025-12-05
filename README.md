@@ -104,3 +104,116 @@ This setup provides a secure and scalable AWS network architecture. It separates
 * private_subnet_ids – Used to deploy backend services that should not be exposed publicly.
 * database_subnet_ids – Used for creating RDS instances in isolated subnets.
 * database_subnet_group_name – Required when launching an RDS instance within these DB subnets.
+
+---
+## Understanding `merge()`, `slice()` Functions & Data Sources
+---
+
+### 1. `merge()` Function (Used for Tags)
+The `merge()` function combines multiple maps into a single map.
+**Example in the module:**
+```hcl
+tags = merge(var.common_tags, var.vpc_tags, { Name = local.resource_name })
+```
+Purpose:
+Adds default/common tags
+Supports resource-specific tags
+Appends the final Name tag
+Later maps override earlier ones
+
+Example:
+common_tags = { Project = "Expense" }
+vpc_tags    = { Owner = "DevOps" }
+merge(common_tags, vpc_tags)
+Result:
+{ Project = "Expense", Owner = "DevOps" }
+
+
+### 2. `slice()` Function (Selecting Availability Zones)
+
+module uses:
+```hcl
+az_names = slice(data.aws_availability_zones.available.names, 0, 2)
+```
+Purpose:
+Fetches all AZs in the region but selects only two of them.
+
+Example:
+Region AZ list:
+["us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"]
+
+Applying slice:
+["us-east-1a", "us-east-1b"]
+
+VPC design uses exactly two AZs to create:
+2 Public Subnets
+2 Private Subnets
+2 Database Subnets
+Ensures high availability and consistent subnet spread.
+
+---
+
+### 3. Data Source for Availability Zones
+```hcl
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+```
+Purpose:
+Fetches AZs dynamically based on the region
+Removes dependency on hardcoding AZ names
+
+Example (us-east-1):
+Available AZs:
+us-east-1a
+us-east-1b
+us-east-1c
+us-east-1d
+
+module uses only:
+us-east-1a
+us-east-1b
+
+These AZs are used to create:
+Public Subnets
+Private Subnets
+Database Subnets
+
+---
+### 4. Data Sources Used in VPC Peering
+Fetching the Default VPC
+```hcl
+data "aws_vpc" "default" {
+  default = true
+}
+```
+Purpose:
+Automatically fetches the default VPC ID
+No manual VPC ID input required
+Fetching the Default VPC Main Route Table
+```hcl
+data "aws_route_tables" "main" {
+  vpc_id = data.aws_vpc.default.id
+  filter {
+    name   = "association.main"
+    values = ["true"]
+  }
+}
+```
+Purpose:
+Identifies the main route table of the default VPC
+Needed for adding return routes during VPC peering.
+
+Why These Data Sources Are Important for Peering?
+When peering is enabled:
+our VPC (Requestor)
+Adds routes in public, private, and database route tables
+Sends traffic to the default VPC through the peering connection
+
+Default VPC (Acceptor)
+Adds a return route to your VPC CIDR in its main route table
+
+Result:
+* Fully functional two-way communication between both VPCs
+* No need for manual route creation
+---
